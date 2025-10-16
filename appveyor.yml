@@ -20,23 +20,33 @@ install:
   - ps: choco install -y -r --no-progress InnoSetup
   - ps: |
       function gitVersion() {
-        $env:newhash=git rev-parse HEAD
-        $env:shorthash=git rev-parse --short HEAD
-        If ($env:appveyor_repo_tag -eq $TRUE) {
-          $env:newVersion=$env:appveyor_repo_tag_name
-          $env:appveyor_info_version=$env:appveyor_repo_tag_name
-        } Else {
-          $gitVersion=git describe --tags --abbrev=0 $env:APPVEYOR_REPO_BRANCH
-          $env:newVersion="$gitVersion.$env:APPVEYOR_BUILD_NUMBER"
-          $env:appveyor_info_version="$env:newVersion"
-        }      
-        $env:appveyor_build_version="$env:newVersion"
+        $env:newhash = git rev-parse HEAD
+        $env:shorthash = git rev-parse --short HEAD
+        $env:gitTag = (git describe --tags --abbrev=0 2>$null)
+
+        if (-not [string]::IsNullOrEmpty($env:appveyor_repo_tag_name)) {
+          # Tagged build
+          $env:newVersion = $env:appveyor_repo_tag_name
+          $env:appveyor_info_version = $env:appveyor_repo_tag_name
+        }
+        elseif (-not [string]::IsNullOrEmpty($env:gitTag)) {
+          # Has previous tag, use it with build number
+          $env:newVersion = "$env:gitTag.$env:APPVEYOR_BUILD_NUMBER"
+          $env:appveyor_info_version = $env:newVersion
+        }
+        else {
+          # No tags found — fallback to branch + short hash
+          $env:newVersion = "$($env:APPVEYOR_REPO_BRANCH)-$($env:APPVEYOR_BUILD_NUMBER)-$($env:shorthash)"
+          $env:appveyor_info_version = $env:newVersion
+        }
+
+        $env:appveyor_build_version = $env:newVersion
         appveyor UpdateBuild -Version "$env:newVersion"
-        write-host "Using hash for build version: $env:newhash"
-        write-host "Update appveyor build version to: $env:appveyor_build_version"
-        write-host "Update appveyor info version to: $env:appveyor_info_version"
+
+        Write-Host "Commit hash: $env:newhash"
+        Write-Host "AppVeyor build version: $env:appveyor_build_version"
       }
-      gitVersion      
+      gitVersion   
       
 # patch the assembly version, but only in our own directories
 assembly_info:
