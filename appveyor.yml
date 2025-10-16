@@ -6,15 +6,18 @@ configuration:
   - Debug
   - Release
 
-image: Visual Studio 2017
+# Modern image with VS2019/2022 compiler support
+image: Visual Studio 2022
 
 skip_commits:
   files:
     - README.md
 
 skip_branch_with_pr: true
-  
-# Taken from https://boblokerse.github.io/2015/11/03/GitVersion-versioning-made-easy-and-dry/
+
+# -----------------------------
+# Installation and Versioning
+# -----------------------------
 install:
   - ver
   - ps: choco install -y -r --no-progress InnoSetup
@@ -30,14 +33,14 @@ install:
           $env:appveyor_info_version = $env:appveyor_repo_tag_name
         }
         elseif (-not [string]::IsNullOrEmpty($env:gitTag)) {
-          # Has previous tag, use it with build number
+          # Has previous tag
           $env:newVersion = "$env:gitTag.$env:APPVEYOR_BUILD_NUMBER"
-          $env:appveyor_info_version = $env:newVersion
+          $env:appveyor_info_version = "$env:newVersion"
         }
         else {
-          # No tags found — fallback to branch + short hash
-          $env:newVersion = "$($env:APPVEYOR_REPO_BRANCH)-$($env:APPVEYOR_BUILD_NUMBER)-$($env:shorthash)"
-          $env:appveyor_info_version = $env:newVersion
+          # No tags found — numeric fallback
+          $env:newVersion = "1.0.$env:APPVEYOR_BUILD_NUMBER.0"
+          $env:appveyor_info_version = "$($env:newVersion)-$($env:APPVEYOR_REPO_BRANCH)-$($env:shorthash)"
         }
 
         $env:appveyor_build_version = $env:newVersion
@@ -45,10 +48,13 @@ install:
 
         Write-Host "Commit hash: $env:newhash"
         Write-Host "AppVeyor build version: $env:appveyor_build_version"
+        Write-Host "Informational version: $env:appveyor_info_version"
       }
-      gitVersion   
-      
-# patch the assembly version, but only in our own directories
+      gitVersion
+
+# -----------------------------
+# Patch Assembly Version Info
+# -----------------------------
 assembly_info:
   patch: true
   file: '**\AssemblyInfo.*'
@@ -56,19 +62,36 @@ assembly_info:
   assembly_file_version: $(appveyor_build_version)
   assembly_informational_version: $(appveyor_info_version)
 
-# Automatically register private account and/or project AppVeyor NuGet feeds.
-#nuget:
-#  account_feed: true
-#  project_feed: true
-#  disable_publish_on_pr: true
-
+# -----------------------------
+# Build Process
+# -----------------------------
 before_build:
-  - nuget restore ScriptPlayer\ScriptPlayer.sln
+  - cmd: nuget restore ScriptPlayer\ScriptPlayer.sln
+
 build:
   parallel: true
   project: ScriptPlayer\ScriptPlayer.sln
   publish_nuget: false
+
+# -----------------------------
+# Post-Build: Package Installer
+# -----------------------------
 after_build:
-  - ps: set PATH=%PATH%;"C:\\Program Files (x86)\\Inno Setup 5"
-  - ps: iscc scriptplayer-installer.iss   
-  - ps: Push-AppveyorArtifact installer\scriptplayer-installer.exe -FileName ScriptPlayer-$env:CONFIGURATION-$env:APPVEYOR_BUILD_VERSION.exe
+  - ps: |
+      $innoSetupPath = "C:\Program Files (x86)\Inno Setup 6"
+      if (-not (Test-Path $innoSetupPath)) {
+        $innoSetupPath = "C:\Program Files (x86)\Inno Setup 5"
+      }
+      Write-Host "Using Inno Setup path: $innoSetupPath"
+      set PATH=%PATH%;"$innoSetupPath"
+      iscc scriptplayer-installer.iss
+
+  - ps: |
+      $artifactPath = "installer\scriptplayer-installer.exe"
+      $artifactName = "ScriptPlayer-$env:CONFIGURATION-$env:APPVEYOR_BUILD_VERSION.exe"
+      if (Test-Path $artifactPath) {
+        Push-AppveyorArtifact $artifactPath -FileName $artifactName
+        Write-Host "✅ Uploaded artifact: $artifactName"
+      } else {
+        Write-Host "⚠️ Warning: Installer not found at $artifactPath"
+      }
